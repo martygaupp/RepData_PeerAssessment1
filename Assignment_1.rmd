@@ -1,0 +1,185 @@
+Reproducible Data Programming Assignment 1
+========================================================
+
+## Loading packages
+
+We will need the following packages to run this code:
+
+* dplyr
+* xtable
+* lattice
+
+```{r echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+library(dplyr)
+library(xtable)
+library(lattice)
+```
+
+## Loading and preprocessing the data
+
+Let's load the data and look at its structure.
+
+```{r}
+ActivityData <- read.csv(file = "activity.csv")
+str(ActivityData)
+```
+
+The structure of the data is actually just fine.  Keeping the dates as factors (61 levels for days) allows us to filter on those levels, which will be convenient for use later on.
+
+## What is the mean total number of steps taken per day?
+
+For now we'll ignore the missing values by invoking `na.rm = TRUE`.  We'll start by grouping the data by date and then summarizing the data by that grouping variable (essentially getting us a summary by day).  Use the dplyr package to make this easier.  
+
+```{r}
+ActivityByDay <- group_by(ActivityData, date)
+ActivitySummary <- summarise(ActivityByDay, DailyTotal = sum(steps, na.rm = TRUE), DailyMean = mean(steps, na.rm = TRUE), DailyMedian = median(steps, na.rm = TRUE))
+```
+
+Now lets make histogram of the total number of steps taken each day.
+
+```{r}
+hist(ActivitySummary$DailyTotal,
+     col = 'red',
+     main = 'Total Number of Steps Taken Each Day',
+     xlab = 'total number of daily steps')
+```
+
+Notice that this is different from a bar plot, as shown below:
+
+```{r}
+bp <- barplot(ActivitySummary$DailyTotal, xlab = 'date', axes = FALSE, axisnames = FALSE)
+axis(1, at = bp, labels = ActivitySummary$date, cex.axis = 0.5, las = 2)
+axis(2)
+```
+
+Now lets print out the daily summarized data.  Use the `xtable` package to make this table look pretty.  Also, note that you must request `results = 'asis'` in the __R__ chunk in order to get __R__ to actually print out the html formatted results.  Without the `asis` request, you'll get a bunch of html code and the table won't be pretty at all.
+
+```{r results ='asis'}
+xt <- xtable(ActivitySummary[1:61,c(1,3,4)])
+print(xt, include.rownames = FALSE, type = "html")
+```
+
+## What is the average daily activity pattern?
+
+Now let's group the data by time interval and then graph an average number of steps taken during each time interval.
+
+```{r}
+ActivityByInterval <- group_by(ActivityData, interval)
+ActivityIntSummary <- summarise(ActivityByInterval, IntervalMean = mean(steps, na.rm = TRUE))
+
+plot(ActivityIntSummary$IntervalMean,
+     type = "l",
+     main = "Average Number of Steps Taken Over 5-Minute Intervals",
+     xlab = "time",
+     ylab = "number of steps",
+     xaxt = "n")
+intervals <- substr(as.POSIXct(sprintf("%04.0f", ActivityIntSummary$interval), format='%H%M'), 12, 16)
+intervals <- c(intervals, "24:00")
+axis(1, at = seq(1,289,12), labels = intervals[seq(1,289,12)], cex.axis = 0.7, las = 2)
+
+maxIntervalVal <- max(ActivityIntSummary$IntervalMean)
+maxIntervalTime <- ActivityIntSummary[ActivityIntSummary$IntervalMean==maxIntervalVal,1]
+maxIntervalTimePer <- substr(as.POSIXct(sprintf("%04.0f", maxIntervalTime), format='%H%M'), 12, 16)
+
+```
+
+Note that the maximum average number of steps taken over a 5-minute interval occurs at `r maxIntervalTimePer`.  At that time, an average of `r format(maxIntervalVal,digits=2,nsmall=2)` steps were taken.  Perhaps the person who wore this fitness tracker walked to work every morning or did a morning workout that involves a lot of walking or running.
+
+## Imputing missing values
+
+There are a lot of missing values (coded as `NA`).  Let's count exactly how many observations have missing values.
+
+```{r}
+JustNA <- ActivityData[ActivityData$steps == 'NA',]
+NumberNAs <- nrow(JustNA)
+```
+
+So it turns out that there are `r NumberNAs` `NA` values in the data set.  This number represents the `r NumberNAs/288` days that do not have any data.
+
+The `NA` values need to be replaced.  The technical term for this process is called "imputing" the values.  To do this, we will go through the original data set and search for the `NA` values in the `steps` variable.  If we find an `NA`, we'll replace that value with the mean of the number of steps for that time interval (based on the rest of the data that has values during that time interval).  Essentially, this is done by creating a vector of mean steps by time interval for each day (the first loop below) and then replacing the values in the original data frame with the value from this newly created vector whenever an `NA` is encountered in the original data frame (the second loop below).
+
+
+```{r}
+ActivityDataMeans = ActivityData
+for (i in 1:61 ) {
+  for (j in 1:288){
+    ActivityDataMeans$steps[(i-1)*288+j] = ActivityIntSummary$IntervalMean[j]
+  }
+}
+
+ActivityDataNoNA = ActivityData
+for (i in 1:17568){
+  if(is.na(ActivityDataNoNA$steps[i])){
+    ActivityDataNoNA$steps[i] = ActivityDataMeans$steps[i]
+  }
+}
+
+JustNANoNA <- ActivityDataNoNA[ActivityDataNoNA$steps == 'NA',]
+NumberNAsNoNA <- nrow(JustNANoNA)
+```
+
+Now we have `r NumberNAsNoNA` `NA` values in the data set, as expected.  Let's reproduce the histogram of the total number of steps taken each day and see what happened.
+
+```{r}
+ActivityByDayNoNA <- group_by(ActivityDataNoNA, date)
+ActivitySummaryNoNA <- summarise(ActivityByDayNoNA, DailyTotal = sum(steps), DailyMean = mean(steps), DailyMedian = median(steps))
+par(mfrow = c(1,2))
+hist(ActivitySummary$DailyTotal,
+     col = 'red',
+     main = 'Total Number of Steps Taken \n Each Day - Original Data',
+     xlab = 'total number of daily steps',
+     ylim = c(0,40))
+hist(ActivitySummaryNoNA$DailyTotal,
+     col = 'red',
+     main = 'Total Number of Steps Taken \n Each Day - Imputed Data',
+     xlab = 'total number of daily steps',
+     ylim = c(0,40))
+par(mfrow = c(1,1))
+```
+
+Looking at these histograms, we see how a lot of the low frequence data (in the first bin) got shifted to the middle frequency bin and that the other bins (the second one and the last two) didn't change at all.  This actually makes sense, because these histograms depict __total__ steps, so we would expect all the days with no activity (the days with all `NA` values in the original dataset) to originally show up in the first bin as 0's.  Now that we've imputed values for them using the means of each time interval, those 0's have become pretty significant numbers and moved to the middle bin.
+
+Let's compare the summary statistics of these two data sets (original and imputed) side-by-side.
+
+```{r results='asis'}
+DataCombined = cbind(ActivitySummary$date, ActivitySummary$DailyTotal, ActivitySummaryNoNA$DailyTotal, ActivitySummary$DailyMean, ActivitySummaryNoNA$DailyMean, ActivitySummary$DailyMedian, ActivitySummaryNoNA$DailyMedian)
+colnames(DataCombined) <- c("Date", "Original_Daily_Total", "Imputed_Daily_Total", "Original_Daily_Mean", "Imputed_Daily_Mean", "Original_Daily_Median",  "Imputed_Daily_Median")
+
+xtALL <- xtable(DataCombined[1:61,])
+print(xtALL, include.rownames = FALSE, type = "html")
+```
+
+Notice how the only thing that changed is how the blanks (which represent days where no data was available, or `NA` values from the original data set) are replaced by the approriate daily total, mean, and median from the rest of the data.  Recall that there were `r NumberNAs/288` days that did not have any data, so now there are `r NumberNAs/288` days that all have the same data and hence __should__ have the same daily total, mean, and median.  As described by the histograms above, the biggest impact is in the total number of steps.  Now there are no days with a 0 in that column because all the `NA` data was replaced by the imputed values.
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+Let's create a new factor variable in the dataset with two levels - "weekday" and "weekend".
+
+```{r}
+ActivityDataNoNA$day <- weekdays(as.Date(ActivityDataNoNA$date))
+for (i in 1:17568){
+  if(ActivityDataNoNA$day[i] == "Saturday" | ActivityDataNoNA$day[i] == "Sunday"){
+    ActivityDataNoNA$DayType[i] = "weekend"
+  } else {
+    ActivityDataNoNA$DayType[i] = "weekday"
+  }
+}
+ActivityDataNoNA$DayType <- factor(ActivityDataNoNA$DayType)
+```
+
+Now let's look at how the average number of steps taken over 5-minute intervals differs if we average over weekdays and weekends separately.  We'll just add another `group_by` variable to get the data properly summarized and then invoke the `lattice` package to create a plot of the weekend data and weekday data.
+
+```{r}
+ActivityByIntervalNoNA <- group_by(ActivityDataNoNA, interval, DayType)
+ActivityIntSummaryNoNA <- summarise(ActivityByIntervalNoNA, IntervalMean = mean(steps))
+xyplot(IntervalMean ~ interval | DayType,
+       data = ActivityIntSummaryNoNA,
+       layout = c(1,2),
+       type = "l",
+       main = "Average Number of Steps Taken Over 5-Minute Intervals",
+       xlab = "time interval",
+       ylab = "number of steps",
+       scales = list(x = list(at = seq(1,2377,99), labels = intervals[seq(1,577,12)], rot = 90)))
+```
+
+In both cases, there appears to be a lot of activity early in the day during the morning.  On weekends, there appears to be a decent amount of activity during the rest of the day until about 9 o'clock at night.  On weekdays, however, there isn't that much activity during the working hours, probably meaning the wearer of the device has a desk job.  Then, after work during the weekday, the activity level ramps up for a few hours (representing perhaps an evening workout) and then simmers down to nearly nothing by about 8 o'clock at night.
